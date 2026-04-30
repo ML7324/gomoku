@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>五子棋 - 终极整合版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #111827; /* gray-900 */
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        #game-wrapper {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100vh;
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        #board-container {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        .board-bg {
+            background-color: #E3C16F;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            position: relative;
+        }
+        canvas {
+            display: block;
+            touch-action: none;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body class="text-white font-sans">
+
+    <div id="game-wrapper">
+        <!-- 顶部信息栏 -->
+        <div class="w-full px-4 py-2 sm:py-3 flex flex-col sm:flex-row justify-between items-center bg-gray-900 border-b border-gray-800 z-20 gap-2 sm:gap-0">
+            <!-- 标题与模式切换 -->
+            <div class="flex items-center justify-between w-full sm:w-auto space-x-4">
+                <h1 class="text-xl font-bold text-emerald-400 tracking-wider">五子棋</h1>
+                <div class="bg-gray-800 rounded-lg p-1 flex border border-gray-700">
+                    <button id="modePVE" class="px-3 py-1 text-xs sm:text-sm rounded-md bg-emerald-600 text-white font-medium transition-colors shadow-sm">挑战 AI</button>
+                    <button id="modePVP" class="px-3 py-1 text-xs sm:text-sm rounded-md text-gray-400 hover:text-white font-medium transition-colors">双人对战</button>
+                </div>
+            </div>
+
+            <!-- 状态与操作按钮 -->
+            <div class="flex items-center justify-between w-full sm:w-auto space-x-2 sm:space-x-4">
+                <div class="flex items-center space-x-2">
+                    <div id="turnIndicator" class="w-4 h-4 rounded-full bg-black border-2 border-gray-600 shadow-inner"></div>
+                    <p id="statusText" class="text-sm font-medium text-gray-200">轮到你落子 (黑)</p>
+                </div>
+                
+                <div class="flex items-center space-x-2">
+                    <button id="aiHelpBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 sm:py-2 rounded-lg border border-indigo-500 transition-colors shadow-sm flex items-center space-x-1 text-sm font-medium">
+                        <span>✨ 帮我走</span>
+                    </button>
+                    <button id="resetBtn" class="bg-gray-800 hover:bg-gray-700 text-emerald-400 p-1.5 sm:p-2 rounded-lg border border-gray-600 transition-colors shadow-sm">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 棋盘主区域 -->
+        <div id="board-container">
+            <div class="board-bg" id="canvasWrapper">
+                <canvas id="gameCanvas"></canvas>
+                
+                <!-- 游戏结束遮罩层 -->
+                <div id="gameOverOverlay" class="absolute inset-0 bg-black bg-opacity-40 flex flex-col items-center justify-center opacity-0 pointer-events-none transition-opacity duration-700 z-10 rounded-lg">
+                    <div class="bg-gray-900 bg-opacity-95 p-6 sm:p-8 rounded-2xl shadow-2xl flex flex-col items-center border border-gray-700 mx-4">
+                        <h2 id="winnerText" class="text-3xl sm:text-4xl font-bold text-white mb-2 drop-shadow-lg text-center">游戏结束</h2>
+                        <p id="winnerSubText" class="text-gray-300 mb-6 text-sm text-center">---</p>
+                        <button id="playAgainBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 sm:py-3 px-6 sm:px-8 rounded-full shadow-lg transform transition hover:scale-105 active:scale-95">
+                            再来一局
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI 提示气泡 -->
+    <div id="aiToast" class="fixed top-24 sm:top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 border border-gray-600 text-white px-5 py-2 rounded-full shadow-2xl opacity-0 pointer-events-none transition-all duration-300 z-50 translate-y-[-20px] flex items-center space-x-2">
+        <span id="aiToastIcon" class="text-emerald-400">⚡</span>
+        <span id="aiToastText" class="font-bold text-gray-200 text-sm whitespace-nowrap">...</span>
+    </div>
+
+    <script>
+        window.onload = function() {
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const canvasWrapper = document.getElementById('canvasWrapper');
+            const boardContainer = document.getElementById('board-container');
+            
+            // UI 元素
+            const statusText = document.getElementById('statusText');
+            const turnIndicator = document.getElementById('turnIndicator');
+            const gameOverOverlay = document.getElementById('gameOverOverlay');
+            const winnerText = document.getElementById('winnerText');
+            const winnerSubText = document.getElementById('winnerSubText');
+            const resetBtn = document.getElementById('resetBtn');
+            const playAgainBtn = document.getElementById('playAgainBtn');
+            const aiHelpBtn = document.getElementById('aiHelpBtn');
+            const aiToast = document.getElementById('aiToast');
+            const aiToastText = document.getElementById('aiToastText');
+            const aiToastIcon = document.getElementById('aiToastIcon');
+            
+            // 模式切换按钮
+            const modePVEBtn = document.getElementById('modePVE');
+            const modePVPBtn = document.getElementById('modePVP');
+
+            const BOARD_SIZE = 15;
+            let PADDING = 0;
+            let CELL_SIZE = 0;
+            
+            const PLAYER_BLACK = 1;
+            const PLAYER_WHITE = 2;
+
+            // 游戏状态
+            let currentMode = 'PVE'; // 'PVE' (人机) 或 'PVP' (双人)
+            let board = [];
+            let currentPlayer = PLAYER_BLACK;
+            let isGameOver = false;
+            let lastMove = null;
+            let moveCount = 0;
+            let helperUsedCount = 0;
+            let winningPieces = null;
+
+            // 动态调整 Canvas 大小
+            function resizeCanvas() {
+                const containerWidth = boardContainer.clientWidth - 20;
+                const containerHeight = boardContainer.clientHeight - 20;
+                const size = Math.min(containerWidth, containerHeight);
+                
+                canvas.width = size;
+                canvas.height = size;
+                canvasWrapper.style.width = size + 'px';
+                canvasWrapper.style.height = size + 'px';
+                
+                CELL_SIZE = size / BOARD_SIZE;
+                PADDING = CELL_SIZE / 2;
+
+                if (board.length > 0) drawBoard();
+            }
+
+            window.addEventListener('resize', resizeCanvas);
+
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            function playDropSound(player) {
+                if(audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(player === PLAYER_BLACK ? 350 : 550, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.1);
+            }
+
+            function setMode(mode) {
+                currentMode = mode;
+                if (mode === 'PVE') {
+                    modePVEBtn.className = "px-3 py-1 text-xs sm:text-sm rounded-md bg-emerald-600 text-white font-medium transition-colors shadow-sm";
+                    modePVPBtn.className = "px-3 py-1 text-xs sm:text-sm rounded-md text-gray-400 hover:text-white font-medium transition-colors bg-transparent";
+                } else {
+                    modePVPBtn.className = "px-3 py-1 text-xs sm:text-sm rounded-md bg-emerald-600 text-white font-medium transition-colors shadow-sm";
+                    modePVEBtn.className = "px-3 py-1 text-xs sm:text-sm rounded-md text-gray-400 hover:text-white font-medium transition-colors bg-transparent";
+                }
+                initGame();
+            }
+
+            function initGame() {
+                resizeCanvas();
+                board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(0));
+                currentPlayer = PLAYER_BLACK;
+                isGameOver = false;
+                lastMove = null;
+                winningPieces = null;
+                moveCount = 0;
+                helperUsedCount = 0;
+                hideAiToast();
+                
+                gameOverOverlay.classList.remove('opacity-100');
+                gameOverOverlay.classList.add('opacity-0', 'pointer-events-none');
+                
+                updateStatusUI();
+                drawBoard();
+            }
+
+            function updateStatusUI() {
+                if (isGameOver) {
+                    aiHelpBtn.disabled = true;
+                    aiHelpBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                    return;
+                }
+                
+                aiHelpBtn.disabled = false;
+                aiHelpBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+
+                if (currentMode === 'PVE') {
+                    if (currentPlayer === PLAYER_BLACK) {
+                        statusText.innerText = "你的回合 (黑)";
+                        turnIndicator.className = "w-4 h-4 rounded-full bg-black border-2 border-gray-600 shadow-inner";
+                    } else {
+                        statusText.innerText = "AI 行动中 (白)...";
+                        turnIndicator.className = "w-4 h-4 rounded-full bg-white border-2 border-gray-300 shadow-inner";
+                        // PVE中，如果是AI回合，不允许玩家点“帮我走”
+                        aiHelpBtn.disabled = true;
+                        aiHelpBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                    }
+                } else {
+                    // PVP 模式
+                    if (currentPlayer === PLAYER_BLACK) {
+                        statusText.innerText = "黑方回合";
+                        turnIndicator.className = "w-4 h-4 rounded-full bg-black border-2 border-gray-600 shadow-inner";
+                    } else {
+                        statusText.innerText = "白方回合";
+                        turnIndicator.className = "w-4 h-4 rounded-full bg-white border-2 border-gray-300 shadow-inner";
+                    }
+                }
+            }
+
+            function drawBoard() {
+                ctx.fillStyle = '#E3C16F';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.strokeStyle = '#6B4226';
+                ctx.lineWidth = Math.max(1, canvas.width / 400);
+                ctx.lineCap = 'round';
+                
+                for (let i = 0; i < BOARD_SIZE; i++) {
+                    const pos = PADDING + i * CELL_SIZE;
+                    ctx.beginPath(); ctx.moveTo(PADDING, pos); ctx.lineTo(canvas.width - PADDING, pos); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(pos, PADDING); ctx.lineTo(pos, canvas.height - PADDING); ctx.stroke();
+                }
+
+                const starPoints = [[3, 3], [11, 3], [3, 11], [11, 11], [7, 7]];
+                ctx.fillStyle = '#6B4226';
+                const starRadius = Math.max(2, CELL_SIZE * 0.1);
+                for (let [r, c] of starPoints) {
+                    ctx.beginPath(); ctx.arc(PADDING + c * CELL_SIZE, PADDING + r * CELL_SIZE, starRadius, 0, Math.PI * 2); ctx.fill();
+                }
+
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (board[r][c] !== 0) {
+                            drawPiece(r, c, board[r][c]);
+                        }
+                    }
+                }
+
+                if (lastMove && !winningPieces) {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.arc(PADDING + lastMove.c * CELL_SIZE, PADDING + lastMove.r * CELL_SIZE, Math.max(2, CELL_SIZE * 0.1), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 绘制获胜连线高光
+                if (winningPieces && winningPieces.length >= 5) {
+                    let sortedLine = [...winningPieces].sort((a, b) => {
+                        if (a.r !== b.r) return a.r - b.r;
+                        return a.c - b.c;
+                    });
+                    
+                    let start = sortedLine[0];
+                    let end = sortedLine[sortedLine.length - 1];
+
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.9)'; 
+                    ctx.lineWidth = CELL_SIZE * 0.25; 
+                    ctx.lineCap = 'round';
+                    
+                    ctx.shadowColor = '#ef4444';
+                    ctx.shadowBlur = 15;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(PADDING + start.c * CELL_SIZE, PADDING + start.r * CELL_SIZE);
+                    ctx.lineTo(PADDING + end.c * CELL_SIZE, PADDING + end.r * CELL_SIZE);
+                    ctx.stroke();
+
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            function drawPiece(r, c, player) {
+                const x = PADDING + c * CELL_SIZE;
+                const y = PADDING + r * CELL_SIZE;
+                const radius = CELL_SIZE * 0.45;
+
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                const gradient = ctx.createRadialGradient(
+                    x - radius * 0.3, y - radius * 0.3, radius * 0.1, 
+                    x, y, radius
+                );
+
+                if (player === PLAYER_BLACK) {
+                    gradient.addColorStop(0, '#666'); gradient.addColorStop(1, '#000');
+                    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+                } else {
+                    gradient.addColorStop(0, '#fff'); gradient.addColorStop(1, '#d1d5db');
+                    ctx.shadowColor = 'rgba(0,0,0,0.2)';
+                }
+
+                ctx.shadowBlur = Math.max(2, CELL_SIZE * 0.1);
+                ctx.shadowOffsetX = Math.max(1, CELL_SIZE * 0.05);
+                ctx.shadowOffsetY = Math.max(1, CELL_SIZE * 0.05);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+            }
+
+            function handleInteraction(event) {
+                if (isGameOver) return;
+                
+                // PVE 模式下，如果轮到 AI (白方) 则禁止玩家点击
+                if (currentMode === 'PVE' && currentPlayer !== PLAYER_BLACK) return;
+
+                let clientX, clientY;
+                if (event.type === 'touchstart' || event.type === 'touchend') {
+                    if (event.changedTouches.length > 0) {
+                        clientX = event.changedTouches[0].clientX; clientY = event.changedTouches[0].clientY;
+                    } else return;
+                } else {
+                    clientX = event.clientX; clientY = event.clientY;
+                }
+
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (clientX - rect.left) * scaleX;
+                const y = (clientY - rect.top) * scaleY;
+
+                const c = Math.round((x - PADDING) / CELL_SIZE);
+                const r = Math.round((y - PADDING) / CELL_SIZE);
+
+                if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === 0) {
+                    placePiece(r, c, currentPlayer);
+                }
+            }
+
+            function placePiece(r, c, player) {
+                board[r][c] = player;
+                lastMove = { r, c };
+                moveCount++;
+                
+                playDropSound(player);
+                
+                const winData = checkWin(r, c, player);
+                if (winData) {
+                    winningPieces = winData; 
+                    drawBoard(); 
+                    handleWin(player);
+                } else {
+                    drawBoard();
+                    currentPlayer = currentPlayer === PLAYER_BLACK ? PLAYER_WHITE : PLAYER_BLACK;
+                    updateStatusUI();
+
+                    // 如果是 PVE 模式，且轮到了电脑(白)
+                    if (currentMode === 'PVE' && currentPlayer === PLAYER_WHITE && !isGameOver) {
+                        setTimeout(() => makeAiMoveFast(PLAYER_WHITE), 50);
+                    }
+                }
+            }
+
+            function checkWin(r, c, player) {
+                const directions = [ [[0, -1], [0, 1]], [[-1, 0], [1, 0]], [[-1, -1], [1, 1]], [[-1, 1], [1, -1]] ];
+                for (let dir of directions) {
+                    let winPieces = [{r, c}]; 
+                    for (let step of dir) {
+                        let nr = r + step[0]; let nc = c + step[1];
+                        while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+                            winPieces.push({r: nr, c: nc});
+                            nr += step[0]; nc += step[1];
+                        }
+                    }
+                    if (winPieces.length >= 5) return winPieces;
+                }
+                return null;
+            }
+
+            function handleWin(player) {
+                isGameOver = true;
+                updateStatusUI();
+                
+                if (currentMode === 'PVE') {
+                    if (player === PLAYER_BLACK) {
+                        winnerText.innerText = helperUsedCount > 0 ? "黑方获胜!" : "你赢了!";
+                        winnerText.className = "text-3xl sm:text-4xl font-bold text-emerald-400 mb-2 text-center";
+                        winnerSubText.innerText = helperUsedCount > 0 ? `军师协助了你 ${helperUsedCount} 次` : "纯手工击败算法，太强了！";
+                    } else {
+                        winnerText.innerText = "AI 获胜!";
+                        winnerText.className = "text-3xl sm:text-4xl font-bold text-white mb-2 text-center";
+                        winnerSubText.innerText = "不要气馁，再挑战一次吧。";
+                    }
+                } else {
+                    // PVP 结算
+                    const colorName = player === PLAYER_BLACK ? "黑方" : "白方";
+                    const colorClass = player === PLAYER_BLACK ? "text-gray-300" : "text-white";
+                    winnerText.innerText = `${colorName}获胜!`;
+                    winnerText.className = `text-3xl sm:text-4xl font-bold ${colorClass} mb-2 text-center drop-shadow-lg`;
+                    winnerSubText.innerText = helperUsedCount > 0 ? `本局共有 ${helperUsedCount} 步是军师代下的` : "精彩的博弈！";
+                }
+                
+                setTimeout(() => {
+                    gameOverOverlay.classList.remove('opacity-0', 'pointer-events-none');
+                    gameOverOverlay.classList.add('opacity-100');
+                }, 1500);
+            }
+
+            let toastTimeout = null;
+            function showAiToast(message, isHelp = false) {
+                aiToastText.innerText = message;
+                aiToastIcon.innerText = isHelp ? "✨" : "⚡";
+                aiToastIcon.className = isHelp ? "text-indigo-400" : "text-emerald-400";
+                
+                aiToast.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-[-20px]');
+                aiToast.classList.add('opacity-100', 'translate-y-0');
+
+                if(toastTimeout) clearTimeout(toastTimeout);
+                toastTimeout = setTimeout(hideAiToast, 2500);
+            }
+
+            function hideAiToast() {
+                aiToast.classList.add('opacity-0', 'pointer-events-none', 'translate-y-[-20px]');
+                aiToast.classList.remove('opacity-100', 'translate-y-0');
+            }
+
+            // --- 核心：本地高速启发式评分算法 ---
+            function evaluateDirection(r, c, dr, dc, player) {
+                let count = 1; let block = 0; let empty = 0;
+                let i = 1;
+                while (r + i*dr >= 0 && r + i*dr < BOARD_SIZE && c + i*dc >= 0 && c + i*dc < BOARD_SIZE) {
+                    if (board[r + i*dr][c + i*dc] === player) { count++; } 
+                    else if (board[r + i*dr][c + i*dc] === 0) { empty++; break; } 
+                    else { block++; break; }
+                    i++;
+                }
+                if (r + i*dr < 0 || r + i*dr >= BOARD_SIZE || c + i*dc < 0 || c + i*dc >= BOARD_SIZE) block++;
+                i = 1;
+                while (r - i*dr >= 0 && r - i*dr < BOARD_SIZE && c - i*dc >= 0 && c - i*dc < BOARD_SIZE) {
+                    if (board[r - i*dr][c - i*dc] === player) { count++; } 
+                    else if (board[r - i*dr][c - i*dc] === 0) { empty++; break; } 
+                    else { block++; break; }
+                    i++;
+                }
+                if (r - i*dr < 0 || r - i*dr >= BOARD_SIZE || c - i*dc < 0 || c - i*dc >= BOARD_SIZE) block++;
+                return getScore(count, block, empty);
+            }
+
+            function getScore(count, block, empty) {
+                if (empty === 0 && block === 2) return 0; 
+                if (count >= 5) return 100000; 
+                if (count === 4) {
+                    if (block === 0) return 10000; 
+                    if (block === 1) return 1000;  
+                }
+                if (count === 3) {
+                    if (block === 0) return 1000;  
+                    if (block === 1) return 100;   
+                }
+                if (count === 2) {
+                    if (block === 0) return 100;   
+                    if (block === 1) return 10;    
+                }
+                if (count === 1) {
+                    if (block === 0) return 10;
+                    if (block === 1) return 1;
+                }
+                return 0;
+            }
+
+            function evaluatePoint(r, c, player) {
+                const directions = [ [0, 1], [1, 0], [1, 1], [1, -1] ];
+                let score = 0;
+                for (let dir of directions) {
+                    score += evaluateDirection(r, c, dir[0], dir[1], player);
+                }
+                return score;
+            }
+
+            // role 代表是为谁算步（1为黑棋，2为白棋）
+            function makeAiMoveFast(role) {
+                if (isGameOver) return;
+
+                const opponentRole = role === PLAYER_BLACK ? PLAYER_WHITE : PLAYER_BLACK;
+                const isHelping = (currentMode === 'PVP' || (currentMode === 'PVE' && role === PLAYER_BLACK));
+
+                if (moveCount === 0) {
+                    placePiece(7, 7, role);
+                    showAiToast("开局霸天元！", isHelping);
+                    return;
+                }
+                
+                if (moveCount === 1) {
+                    let startR = lastMove ? lastMove.r : 7;
+                    let startC = lastMove ? lastMove.c : 7;
+                    let moves = [ [0,1], [1,0], [0,-1], [-1,0], [1,1], [-1,-1] ];
+                    for(let m of moves) {
+                        let nr = startR + m[0], nc = startC + m[1];
+                        if(nr>=0 && nr<BOARD_SIZE && nc>=0 && nc<BOARD_SIZE && board[nr][nc] === 0) {
+                            placePiece(nr, nc, role);
+                            if(!isHelping) showAiToast("跟上！");
+                            else showAiToast("军师建议走这", true);
+                            return;
+                        }
+                    }
+                }
+
+                let bestScore = -1;
+                let bestMoves = [];
+                let maxAttack = 0;
+                let maxDefense = 0;
+
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (board[r][c] === 0) {
+                            let attackScore = evaluatePoint(r, c, role);
+                            let defenseScore = evaluatePoint(r, c, opponentRole);
+
+                            let totalScore = attackScore + defenseScore;
+                            
+                            if (attackScore > maxAttack) maxAttack = attackScore;
+                            if (defenseScore > maxDefense) maxDefense = defenseScore;
+
+                            if (totalScore > bestScore) {
+                                bestScore = totalScore;
+                                bestMoves = [{r, c}];
+                            } else if (totalScore === bestScore) {
+                                bestMoves.push({r, c});
+                            }
+                        }
+                    }
+                }
+
+                if (bestMoves.length > 0) {
+                    let chosen = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+                    
+                    if (isHelping) {
+                        if (maxAttack >= 100000) showAiToast("军师指点：绝杀，直接拿下！", true);
+                        else if (maxDefense >= 10000) showAiToast("军师指点：危险！必须挡住！", true);
+                        else if (maxAttack >= 10000) showAiToast("军师指点：主动出击，形成杀招！", true);
+                        else if (maxDefense >= 1000) showAiToast("军师指点：稳一手，防住这块。", true);
+                        else showAiToast("军师替你走了一步好棋。", true);
+                    } else {
+                        if (maxAttack >= 100000) showAiToast("绝杀无解！");
+                        else if (maxDefense >= 10000) showAiToast("休想连五！");
+                        else if (maxAttack >= 10000) showAiToast("看你防不防得住！");
+                        else if (maxDefense >= 1000) showAiToast("严密防守。");
+                        else showAiToast("轮到你了");
+                    }
+
+                    placePiece(chosen.r, chosen.c, role);
+                }
+            }
+
+            // 军师代走
+            function askAiForHelp() {
+                if (isGameOver) return;
+                if (currentMode === 'PVE' && currentPlayer !== PLAYER_BLACK) return; // PVE下只能帮玩家
+                
+                helperUsedCount++;
+                makeAiMoveFast(currentPlayer);
+            }
+
+            // 事件绑定
+            canvas.addEventListener('click', handleInteraction);
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                handleInteraction(e);
+            }, { passive: false });
+            
+            document.body.addEventListener('touchmove', function(e) {
+                e.preventDefault();
+            }, { passive: false });
+
+            resetBtn.addEventListener('click', initGame);
+            playAgainBtn.addEventListener('click', initGame);
+            
+            aiHelpBtn.addEventListener('click', askAiForHelp);
+            aiHelpBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                askAiForHelp();
+            }, { passive: false });
+
+            modePVEBtn.addEventListener('click', () => setMode('PVE'));
+            modePVPBtn.addEventListener('click', () => setMode('PVP'));
+
+            // 启动
+            initGame();
+        };
+    </script>
+</body>
+</html>
