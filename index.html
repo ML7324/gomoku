@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>最强五子棋联机版 - 纯享版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Socket.io 客户端 -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            background-color: #111827;
+            color: #f3f4f6;
+            touch-action: manipulation;
+        }
+        #game-board {
+            background-color: #dcb37b;
+            background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23noise)' opacity='0.15'/%3E%3C/svg%3E");
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5), 0 10px 30px -10px rgba(0,0,0,0.8);
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .pulse {
+            animation: pulse-border 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-border {
+            0%, 100% { border-color: rgba(239, 68, 68, 0.2); }
+            50% { border-color: rgba(239, 68, 68, 0.8); }
+        }
+        .cheat-btn-transition {
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 relative">
+
+    <div id="toast" class="fixed top-8 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-lg shadow-2xl text-sm font-bold opacity-0 transition-opacity duration-300 pointer-events-none z-50">
+        提示信息
+    </div>
+
+    <div class="max-w-2xl w-full bg-gray-800 border border-gray-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col relative">
+        <div class="bg-gray-900 border-b border-gray-700 p-5 flex justify-between items-center z-10">
+            <div>
+                <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500 tracking-wider">
+                    GOMOKU MASTER
+                </h1>
+                <p id="mode-badge" class="text-xs text-gray-400 mt-1 font-mono">选择游戏模式</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <span class="relative flex h-3 w-3 hidden" id="thinking-indicator">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                </span>
+                <span id="status-text" class="text-sm font-bold text-gray-300"></span>
+            </div>
+        </div>
+
+        <!-- 屏幕 1：主菜单 -->
+        <div id="screen-menu" class="p-8 flex flex-col items-center space-y-6">
+            <h2 class="text-xl font-bold text-white mb-4">请选择模式</h2>
+            <button id="btn-sp-mode" class="w-full max-w-xs bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-bold py-4 px-6 rounded-xl transition duration-200 shadow-lg">
+                👤 单人模式 (挑战AI)
+            </button>
+            <button id="btn-mp-mode" class="w-full max-w-xs bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white font-bold py-4 px-6 rounded-xl transition duration-200 shadow-lg">
+                🌐 联机模式 (好友对战)
+            </button>
+        </div>
+
+        <!-- 屏幕 2：联机大厅 -->
+        <div id="screen-mp-lobby" class="p-8 flex flex-col items-center space-y-6 hidden">
+            <h2 class="text-xl font-bold text-white mb-2">联机大厅</h2>
+            <div class="w-full max-w-xs bg-gray-700 p-4 rounded-xl border border-gray-600">
+                <button id="btn-create-room" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg transition duration-200 mb-4">
+                    ➕ 创建新房间
+                </button>
+                <div class="relative flex items-center py-2">
+                    <div class="flex-grow border-t border-gray-500"></div>
+                    <span class="flex-shrink-0 mx-4 text-gray-400 text-sm">或者</span>
+                    <div class="flex-grow border-t border-gray-500"></div>
+                </div>
+                <input type="text" id="input-room-code" placeholder="输入5位房间码" class="w-full bg-gray-800 text-white text-center font-mono text-xl py-3 px-4 rounded-lg border border-gray-500 focus:outline-none focus:border-green-500 mb-4 mt-2 tracking-widest" maxlength="5">
+                <button id="btn-join-room" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg transition duration-200">
+                    🔗 加入房间
+                </button>
+            </div>
+            <button id="btn-back-to-menu" class="text-gray-400 hover:text-white underline text-sm mt-4">返回主菜单</button>
+        </div>
+
+        <!-- 屏幕 3：游戏区 -->
+        <div id="screen-game" class="p-6 flex flex-col items-center relative hidden">
+            <div id="room-info-bar" class="w-full bg-gray-700 rounded-lg py-2 px-4 mb-4 flex justify-between items-center border border-gray-600 hidden">
+                <span class="text-sm text-gray-300">房间码: <strong id="display-room-code" class="text-yellow-400 font-mono text-lg tracking-widest">-----</strong></span>
+                <span id="player-role-badge" class="text-xs px-2 py-1 bg-gray-800 rounded text-gray-300 border border-gray-500">你是: 观察者</span>
+            </div>
+
+            <div id="game-board" class="rounded-lg p-3 relative transition-all duration-300 border-4 border-transparent">
+                <canvas id="board" width="450" height="450"></canvas>
+            </div>
+
+            <div class="mt-6 flex w-full space-x-4">
+                <button id="btn-leave-game" class="flex-1 bg-gradient-to-r from-gray-700 to-gray-600 hover:from-gray-600 hover:to-gray-500 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-lg border border-gray-500">
+                    离开对局 / 重新开始
+                </button>
+            </div>
+
+            <!-- 反馈与外挂区 -->
+            <div class="mt-4 w-full flex justify-between items-center px-2">
+                <input type="text" id="feedback-input" placeholder="反馈" class="bg-transparent border-none text-gray-600 text-xs focus:outline-none focus:text-gray-400 w-24">
+                <button id="btn-ai-cheat" class="hidden cheat-btn-transition bg-red-600 hover:bg-red-500 text-white text-xs font-bold py-2 px-4 rounded shadow-[0_0_10px_rgba(220,38,38,0.7)] border border-red-400">
+                    🤖 AI 帮下
+                </button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ==========================================
+// 🔴 全局配置：部署后请修改这里的地址！🔴
+// ==========================================
+// 本地开发测试用 'http://localhost:3000'
+// 部署 Render 后，改成 Render 给你的后端地址，例如 'https://my-gomoku-backend.onrender.com'
+const BACKEND_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+    ? 'http://localhost:3000' 
+    : 'https://填写你Render后端的网址.onrender.com';
+
+let socket = null;
+
+function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.remove('opacity-0');
+    setTimeout(() => { toast.classList.add('opacity-0'); }, 3000);
+}
+
+// ==========================================
+// 状态与 AI 算法 (保留不动)
+// ==========================================
+let currentMode = 'menu'; 
+let currentRoomId = null;
+let isMultiplayer = false;
+let myRole = 1; 
+let currentTurn = 1; 
+let isGameActive = false; 
+let isAILoading = false; 
+
+const GRID_SIZE = 15;
+const CANVAS_SIZE = 450;
+const CELL_SIZE = CANVAS_SIZE / GRID_SIZE;
+const EMPTY = 0, HUMAN = 1, AI = 2, WALL = 3; 
+const TIME_LIMIT = 1500; 
+const MAX_CANDIDATES = 20;
+
+let board = new Uint8Array(GRID_SIZE * GRID_SIZE); 
+let lastMoveIndex = -1;
+
+const SCORE_TABLE_AI = new Int32Array(4096);
+const SCORE_TABLE_HUMAN = new Int32Array(4096);
+const LINES = [];
+
+function getShapeScore(s) {
+    if (s.includes('11111')) return 100000000;
+    if (s === '011110') return 5000000;
+    let score = 0;
+    const rush4 = ['011112', '211110', '10111', '11101', '11011'];
+    for (let p of rush4) if (s.includes(p)) score += 100000;
+    const alive3 = ['011100', '001110', '010110', '011010'];
+    for (let p of alive3) if (s.includes(p)) score += 10000;
+    const sleep3 = ['211100', '001112', '210110', '011012', '211010', '010112', '10011', '11001', '10101'];
+    for (let p of sleep3) if (s.includes(p)) score += 1000;
+    const alive2 = ['001100', '010100', '001010', '010010'];
+    for (let p of alive2) if (s.includes(p)) score += 100;
+    const sleep2 = ['211000', '000112', '210100', '001012', '210010', '010012', '10001'];
+    for (let p of sleep2) if (s.includes(p)) score += 10;
+    return score;
+}
+
+function initAI() {
+    for (let i = 0; i < 4096; i++) {
+        let p = []; let temp = i;
+        for (let j = 0; j < 6; j++) { p.push(temp % 4); temp = Math.floor(temp / 4); }
+        p.reverse();
+        let sAi = p.map(x => x === AI ? '1' : (x === HUMAN || x === WALL ? '2' : '0')).join('');
+        SCORE_TABLE_AI[i] = getShapeScore(sAi);
+        let sHu = p.map(x => x === HUMAN ? '1' : (x === AI || x === WALL ? '2' : '0')).join('');
+        SCORE_TABLE_HUMAN[i] = getShapeScore(sHu);
+    }
+    for (let r = 0; r < 15; r++) { let line = []; for (let c = 0; c < 15; c++) line.push(r * 15 + c); LINES.push(line); }
+    for (let c = 0; c < 15; c++) { let line = []; for (let r = 0; r < 15; r++) line.push(r * 15 + c); LINES.push(line); }
+    for (let k = -14; k <= 14; k++) { let line = []; for (let r = 0; r < 15; r++) { let c = r - k; if (c >= 0 && c < 15) line.push(r * 15 + c); } if (line.length >= 5) LINES.push(line); }
+    for (let k = 0; k <= 28; k++) { let line = []; for (let r = 0; r < 15; r++) { let c = k - r; if (c >= 0 && c < 15) line.push(r * 15 + c); } if (line.length >= 5) LINES.push(line); }
+}
+
+function evaluateBoard(currentBoard) {
+    let aiScore = 0; let humanScore = 0;
+    for (let i = 0; i < LINES.length; i++) {
+        let line = LINES[i]; let len = line.length;
+        let seq = new Uint8Array(len + 2); seq[0] = WALL;
+        for (let j = 0; j < len; j++) seq[j + 1] = currentBoard[line[j]];
+        seq[len + 1] = WALL;
+        for (let w = 0; w <= len + 2 - 6; w++) {
+            let hash = seq[w] * 1024 + seq[w+1] * 256 + seq[w+2] * 64 + seq[w+3] * 16 + seq[w+4] * 4 + seq[w+5];
+            aiScore += SCORE_TABLE_AI[hash]; humanScore += SCORE_TABLE_HUMAN[hash];
+        }
+    }
+    return aiScore - humanScore * 1.5;
+}
+
+function checkTerminalWin(currentBoard, player) {
+    for (let i = 0; i < LINES.length; i++) {
+        let line = LINES[i]; let count = 0;
+        for (let j = 0; j < line.length; j++) {
+            if (currentBoard[line[j]] === player) {
+                count++; if (count >= 5) return true;
+            } else count = 0;
+        }
+    }
+    return false;
+}
+
+let aiTimeOut = false; let aiStartTime = 0; let nodesSearched = 0;
+
+function generateMoves(currentBoard) {
+    let moves = []; let visited = new Uint8Array(225); let hasPiece = false;
+    for (let i = 0; i < 225; i++) {
+        if (currentBoard[i] !== EMPTY) {
+            hasPiece = true; let r = Math.floor(i / 15); let c = i % 15;
+            for (let dr = -2; dr <= 2; dr++) {
+                for (let dc = -2; dc <= 2; dc++) {
+                    let nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < 15 && nc >= 0 && nc < 15) {
+                        let idx = nr * 15 + nc;
+                        if (currentBoard[idx] === EMPTY && !visited[idx]) { moves.push(idx); visited[idx] = 1; }
+                    }
+                }
+            }
+        }
+    }
+    if (!hasPiece) return [112]; 
+    let scoredMoves = moves.map(idx => {
+        currentBoard[idx] = AI; let sAi = evaluatePointThreat(currentBoard, idx, AI);
+        currentBoard[idx] = HUMAN; let sHu = evaluatePointThreat(currentBoard, idx, HUMAN);
+        currentBoard[idx] = EMPTY;
+        return { idx, score: sAi + sHu }; 
+    });
+    scoredMoves.sort((a, b) => b.score - a.score);
+    return scoredMoves.slice(0, MAX_CANDIDATES).map(m => m.idx);
+}
+
+function evaluatePointThreat(currentBoard, idx, player) {
+    let score = 0; let r = Math.floor(idx / 15); let c = idx % 15;
+    const dirs = [[1,0], [0,1], [1,1], [1,-1]];
+    for (let [dr, dc] of dirs) {
+        let count = 1; let block = 0;
+        for (let f = 1; f <= 4; f++) {
+            let nr = r + f*dr, nc = c + f*dc;
+            if (nr<0||nr>=15||nc<0||nc>=15) { block++; break; }
+            let cell = currentBoard[nr*15+nc];
+            if (cell === player) count++; else if (cell === EMPTY) break; else { block++; break; }
+        }
+        for (let b = 1; b <= 4; b++) {
+            let nr = r - b*dr, nc = c - b*dc;
+            if (nr<0||nr>=15||nc<0||nc>=15) { block++; break; }
+            let cell = currentBoard[nr*15+nc];
+            if (cell === player) count++; else if (cell === EMPTY) break; else { block++; break; }
+        }
+        if (count >= 5) score += 100000;
+        else if (count === 4 && block === 0) score += 10000;
+        else if (count === 4 && block === 1) score += 1000;
+        else if (count === 3 && block === 0) score += 1000;
+    }
+    return score;
+}
+
+function minimax(currentBoard, depth, alpha, beta, isMaximizing) {
+    if ((nodesSearched++ % 1000) === 0 && performance.now() - aiStartTime > TIME_LIMIT) { aiTimeOut = true; return 0; }
+    if (checkTerminalWin(currentBoard, AI)) return 100000000;
+    if (checkTerminalWin(currentBoard, HUMAN)) return -100000000;
+    if (depth === 0) return evaluateBoard(currentBoard);
+    let candidates = generateMoves(currentBoard);
+    if (candidates.length === 0) return 0; 
+    if (isMaximizing) {
+        let maxEval = -Infinity;
+        for (let idx of candidates) {
+            currentBoard[idx] = AI; let evalScore = minimax(currentBoard, depth - 1, alpha, beta, false); currentBoard[idx] = EMPTY;
+            if (aiTimeOut) return 0;
+            maxEval = Math.max(maxEval, evalScore); alpha = Math.max(alpha, evalScore);
+            if (beta <= alpha) break; 
+        }
+        return maxEval;
+    } else {
+        let minEval = Infinity;
+        for (let idx of candidates) {
+            currentBoard[idx] = HUMAN; let evalScore = minimax(currentBoard, depth - 1, alpha, beta, true); currentBoard[idx] = EMPTY;
+            if (aiTimeOut) return 0;
+            minEval = Math.min(minEval, evalScore); beta = Math.min(beta, evalScore);
+            if (beta <= alpha) break; 
+        }
+        return minEval;
+    }
+}
+
+function getBestMove() {
+    aiStartTime = performance.now(); aiTimeOut = false; nodesSearched = 0;
+    let bestMove = -1; let candidates = generateMoves(board);
+    if (candidates.length === 1) return candidates[0]; 
+    for (let depth = 1; depth <= 12; depth++) {
+        let currentBestMove = -1; let currentBestScore = -Infinity; let alpha = -Infinity; let beta = Infinity;
+        for (let idx of candidates) {
+            board[idx] = AI; let score = minimax(board, depth - 1, alpha, beta, false); board[idx] = EMPTY;
+            if (aiTimeOut) break;
+            if (score > currentBestScore) { currentBestScore = score; currentBestMove = idx; }
+            alpha = Math.max(alpha, score);
+        }
+        if (aiTimeOut) break;
+        bestMove = currentBestMove;
+        candidates.sort((a, b) => (a === bestMove ? -1 : (b === bestMove ? 1 : 0)));
+        if (currentBestScore >= 50000000) break; 
+    }
+    return bestMove;
+}
+
+function getCheatBestMove(myTargetRole) {
+    let backupBoard = new Uint8Array(board);
+    if (myTargetRole === 1) {
+        for (let i = 0; i < 225; i++) {
+            if (board[i] === 1) board[i] = 2; else if (board[i] === 2) board[i] = 1;
+        }
+    }
+    let bestMove = getBestMove();
+    board = backupBoard;
+    return bestMove;
+}
+
+// ==========================================
+// 绘图与 UI
+// ==========================================
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+const statusText = document.getElementById('status-text');
+const thinkingIndicator = document.getElementById('thinking-indicator');
+const boardContainer = document.getElementById('game-board');
+
+function setupCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = CANVAS_SIZE * dpr; canvas.height = CANVAS_SIZE * dpr;
+    canvas.style.width = CANVAS_SIZE + 'px'; canvas.style.height = CANVAS_SIZE + 'px';
+    ctx.scale(dpr, dpr);
+}
+
+function drawBoard() {
+    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    ctx.beginPath(); ctx.strokeStyle = '#4a2f1d'; ctx.lineWidth = 1.5;
+    for (let i = 0; i < GRID_SIZE; i++) {
+        ctx.moveTo(CELL_SIZE / 2, CELL_SIZE / 2 + i * CELL_SIZE); ctx.lineTo(CANVAS_SIZE - CELL_SIZE / 2, CELL_SIZE / 2 + i * CELL_SIZE);
+        ctx.moveTo(CELL_SIZE / 2 + i * CELL_SIZE, CELL_SIZE / 2); ctx.lineTo(CELL_SIZE / 2 + i * CELL_SIZE, CANVAS_SIZE - CELL_SIZE / 2);
+    }
+    ctx.stroke();
+    const stars = [[3, 3], [11, 3], [3, 11], [11, 11], [7, 7]];
+    ctx.fillStyle = '#4a2f1d';
+    stars.forEach(([r, c]) => {
+        ctx.beginPath(); ctx.arc(CELL_SIZE / 2 + c * CELL_SIZE, CELL_SIZE / 2 + r * CELL_SIZE, 3.5, 0, 2 * Math.PI); ctx.fill();
+    });
+    for (let i = 0; i < 225; i++) {
+        if (board[i] !== EMPTY) {
+            drawPiece(Math.floor(i / 15), i % 15, board[i], i === lastMoveIndex);
+        }
+    }
+}
+
+function drawPiece(r, c, player, isLast) {
+    const x = CELL_SIZE / 2 + c * CELL_SIZE; const y = CELL_SIZE / 2 + r * CELL_SIZE; const radius = CELL_SIZE * 0.43;
+    ctx.beginPath(); ctx.arc(x + 2, y + 2, radius, 0, 2 * Math.PI); ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, radius, 0, 2 * Math.PI);
+    const gradient = ctx.createRadialGradient(x - radius/3, y - radius/3, radius/5, x, y, radius);
+    if (player === 1) { gradient.addColorStop(0, '#555'); gradient.addColorStop(1, '#050505'); } 
+    else { gradient.addColorStop(0, '#fff'); gradient.addColorStop(1, '#d4d4d4'); }
+    ctx.fillStyle = gradient; ctx.fill();
+    if (isLast) { ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(x, y, 3, 0, 2 * Math.PI); ctx.fill(); }
+}
+
+function updateStatusUI(customMsg, colorClass = "text-gray-300", showPulse = false) {
+    statusText.textContent = customMsg;
+    statusText.className = `text-sm font-bold ${colorClass}`;
+    if (showPulse) { thinkingIndicator.classList.remove('hidden'); boardContainer.classList.add('pulse'); } 
+    else { thinkingIndicator.classList.add('hidden'); boardContainer.classList.remove('pulse'); }
+}
+
+function switchScreen(screenId) {
+    ['screen-menu', 'screen-mp-lobby', 'screen-game'].forEach(id => document.getElementById(id).classList.add('hidden'));
+    document.getElementById(screenId).classList.remove('hidden');
+}
+
+// ==========================================
+// 单机与联机逻辑 (整合 WebSocket)
+// ==========================================
+
+function startSinglePlayer() {
+    isMultiplayer = false; myRole = 1; currentTurn = 1;
+    board.fill(EMPTY); lastMoveIndex = -1; isGameActive = true; isAILoading = false; drawBoard();
+    switchScreen('screen-game');
+    document.getElementById('mode-badge').textContent = '单机模式 v.s. AI';
+    document.getElementById('room-info-bar').classList.add('hidden');
+    updateStatusUI("你的回合 (黑子)");
+}
+
+function connectSocket() {
+    if (!socket) {
+        showToast("正在连接服务器...");
+        socket = io(BACKEND_URL);
+        
+        socket.on('connect', () => showToast("已连接到服务器！"));
+        socket.on('connect_error', () => showToast("服务器连接失败，请检查配置"));
+        socket.on('errorMsg', (msg) => showToast(msg));
+        
+        socket.on('roomCreated', (data) => enterMPGame(data.code, data.role, "等待对手加入..."));
+        socket.on('roomJoined', (data) => {
+            enterMPGame(data.code, data.role, "游戏即将开始");
+            board = new Uint8Array(data.board); currentTurn = data.turn; drawBoard();
+        });
+        
+        socket.on('gameStarted', (data) => {
+            isGameActive = true; currentTurn = data.turn;
+            checkMPTurn();
+        });
+
+        socket.on('boardUpdated', (data) => {
+            board = new Uint8Array(data.board);
+            currentTurn = data.turn;
+            lastMoveIndex = data.lastMove;
+            drawBoard();
+            
+            // 客户端自己检查是否有人赢了
+            if (checkTerminalWin(board, 1)) {
+                isGameActive = false;
+                updateStatusUI(myRole === 1 ? "🎉 游戏结束，你赢了！" : "💀 游戏结束，黑子获胜", myRole === 1 ? "text-green-400" : "text-red-400");
+            } else if (checkTerminalWin(board, 2)) {
+                isGameActive = false;
+                updateStatusUI(myRole === 2 ? "🎉 游戏结束，你赢了！" : "💀 游戏结束，白子获胜", myRole === 2 ? "text-green-400" : "text-red-400");
+            } else {
+                checkMPTurn();
+            }
+        });
+
+        socket.on('opponentLeft', () => {
+            isGameActive = false;
+            updateStatusUI("对手已退出，游戏结束", "text-red-400");
+        });
+    }
+}
+
+function enterMPGame(code, role, statusMsg) {
+    isMultiplayer = true; currentRoomId = code; myRole = role;
+    isGameActive = false; isAILoading = false; board.fill(EMPTY); lastMoveIndex = -1; drawBoard();
+    
+    switchScreen('screen-game');
+    document.getElementById('mode-badge').textContent = '在线联机模式';
+    document.getElementById('room-info-bar').classList.remove('hidden');
+    document.getElementById('display-room-code').textContent = code;
+    document.getElementById('player-role-badge').textContent = myRole === 1 ? "你是: 黑子(先手)" : "你是: 白子(后手)";
+    updateStatusUI(statusMsg, "text-yellow-400");
+}
+
+function checkMPTurn() {
+    isAILoading = false;
+    if (currentTurn === myRole) updateStatusUI("👉 你的回合", "text-green-400");
+    else updateStatusUI("⏳ 等待对手落子...", "text-gray-400");
+}
+
+// 事件绑定
+document.getElementById('btn-sp-mode').addEventListener('click', startSinglePlayer);
+document.getElementById('btn-mp-mode').addEventListener('click', () => {
+    connectSocket(); switchScreen('screen-mp-lobby');
+});
+
+document.getElementById('btn-create-room').addEventListener('click', () => socket && socket.emit('createRoom'));
+document.getElementById('btn-join-room').addEventListener('click', () => {
+    const code = document.getElementById('input-room-code').value.trim();
+    if (code.length !== 5) return showToast("请输入5位正确的房间码");
+    socket && socket.emit('joinRoom', code);
+});
+document.getElementById('btn-back-to-menu').addEventListener('click', () => switchScreen('screen-menu'));
+
+document.getElementById('btn-leave-game').addEventListener('click', () => {
+    if (socket && isMultiplayer) socket.disconnect();
+    socket = null; switchScreen('screen-menu');
+});
+
+canvas.addEventListener('click', (e) => {
+    if (!isGameActive || isAILoading) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / (rect.width * (window.devicePixelRatio || 1)));
+    const y = (e.clientY - rect.top) * (canvas.height / (rect.height * (window.devicePixelRatio || 1)));
+    const c = Math.floor(x / CELL_SIZE); const r = Math.floor(y / CELL_SIZE);
+    const idx = r * 15 + c;
+
+    if (r >= 0 && r < 15 && c >= 0 && c < 15 && board[idx] === EMPTY) {
+        if (isMultiplayer) {
+            if (currentTurn !== myRole) return;
+            isAILoading = true; // 防抖
+            socket.emit('makeMove', { code: currentRoomId, idx });
+        } else {
+            // 单机逻辑
+            board[idx] = HUMAN; lastMoveIndex = idx; drawBoard();
+            if (checkTerminalWin(board, HUMAN)) {
+                isGameActive = false; updateStatusUI("🏆 难以置信，你击败了大师 AI！", "text-green-400"); return;
+            }
+            isAILoading = true; updateStatusUI("AI 正在计算最佳路径...", "text-red-400", true);
+            setTimeout(() => {
+                let aiMove = getBestMove();
+                if (aiMove !== -1) {
+                    board[aiMove] = AI; lastMoveIndex = aiMove; drawBoard();
+                    if (checkTerminalWin(board, AI)) { isGameActive = false; updateStatusUI("💀 游戏结束，AI 获胜！", "text-red-400"); } 
+                    else updateStatusUI("你的回合 (黑子)");
+                }
+                isAILoading = false;
+            }, 50);
+        }
+    }
+});
+
+// 外挂逻辑
+const cheatBtn = document.getElementById('btn-ai-cheat');
+document.getElementById('feedback-input').addEventListener('input', (e) => {
+    e.target.value === '666666' ? cheatBtn.classList.remove('hidden') : cheatBtn.classList.add('hidden');
+});
+cheatBtn.addEventListener('click', () => {
+    if (!isGameActive || isAILoading) return;
+    if (isMultiplayer && currentTurn !== myRole) return;
+    isAILoading = true; updateStatusUI("外挂 AI 计算中...", "text-red-400", true);
+    setTimeout(() => {
+        let move = getCheatBestMove(myRole); 
+        if (move !== -1) {
+            if (isMultiplayer) {
+                socket.emit('makeMove', { code: currentRoomId, idx: move });
+            } else {
+                board[move] = HUMAN; lastMoveIndex = move; drawBoard();
+                if (checkTerminalWin(board, HUMAN)) { isGameActive = false; updateStatusUI("🏆 (外挂) 击败了 AI！", "text-green-400"); } 
+                else {
+                    updateStatusUI("AI 正在计算最佳路径...", "text-red-400", true);
+                    setTimeout(() => {
+                        let aiMove = getBestMove();
+                        if (aiMove !== -1) {
+                            board[aiMove] = AI; lastMoveIndex = aiMove; drawBoard();
+                            if (checkTerminalWin(board, AI)) { isGameActive = false; updateStatusUI("💀 游戏结束，AI 获胜！", "text-red-400"); } 
+                            else { isAILoading = false; updateStatusUI("你的回合 (黑子)"); }
+                        }
+                    }, 50);
+                }
+            }
+        }
+    }, 50);
+});
+
+initAI(); setupCanvas(); drawBoard();
+</script>
+</body>
+</html>
