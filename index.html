@@ -108,11 +108,33 @@
             </div>
 
             <!-- 反馈与外挂区 -->
-            <div class="mt-4 w-full flex justify-between items-center px-2">
-                <input type="text" id="feedback-input" placeholder="反馈" class="bg-transparent border-none text-gray-600 text-xs focus:outline-none focus:text-gray-400 w-24">
-                <button id="btn-ai-cheat" class="hidden cheat-btn-transition bg-red-600 hover:bg-red-500 text-white text-xs font-bold py-2 px-4 rounded shadow-[0_0_10px_rgba(220,38,38,0.7)] border border-red-400">
-                    🤖 AI 帮下
-                </button>
+            <div class="mt-4 w-full flex flex-col gap-2 px-2">
+                <div class="flex justify-between items-center">
+                    <input type="text" id="feedback-input" placeholder="反馈" class="bg-transparent border-none text-gray-600 text-xs focus:outline-none focus:text-gray-400 w-24">
+                    <button id="btn-ai-cheat" class="hidden cheat-btn-transition bg-red-600 hover:bg-red-500 text-white text-xs font-bold py-2 px-4 rounded shadow-[0_0_10px_rgba(220,38,38,0.7)] border border-red-400">
+                        🤖 AI 帮下
+                    </button>
+                </div>
+                
+                <!-- 🎮 AI 强度调节面板 (外挂模式专用) -->
+                <div id="ai-tune-panel" class="hidden mt-2 p-3 bg-gray-800 rounded-lg border border-gray-600">
+                    <p class="text-xs text-yellow-400 mb-2 font-bold">⚙️ 外挂参数调节 (实时生效)</p>
+                    <div class="mb-2">
+                        <div class="flex justify-between text-xs text-gray-300">
+                            <span>⏱️ 思考时间: <span id="time-limit-value">1500</span> ms</span>
+                            <span class="text-gray-500">慢 ← → 快</span>
+                        </div>
+                        <input type="range" id="time-limit-slider" min="100" max="5000" step="50" value="1500" class="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-300">
+                            <span>🎯 候选点数量: <span id="candidates-value">20</span></span>
+                            <span class="text-gray-500">少(弱) ← → 多(强)</span>
+                        </div>
+                        <input type="range" id="candidates-slider" min="5" max="50" step="1" value="20" class="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    <p class="text-[10px] text-gray-500 mt-2 text-center">💡 调高数值 = AI更强但更慢 | 调低 = 反应快但变弱</p>
+                </div>
             </div>
         </div>
     </div>
@@ -123,7 +145,9 @@
 // ==========================================
 // 本地开发测试用 'http://localhost:3000'
 // 部署 Render 后，改成 Render 给你的后端地址，例如 'https://my-gomoku-backend.onrender.com'
-const BACKEND_URL = 'https://gomoku-production-7a06.up.railway.app';
+const BACKEND_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+    ? 'http://localhost:3000' 
+    : 'https://填写你Render后端的网址.onrender.com';
 
 let socket = null;
 
@@ -149,8 +173,10 @@ const GRID_SIZE = 15;
 const CANVAS_SIZE = 450;
 const CELL_SIZE = CANVAS_SIZE / GRID_SIZE;
 const EMPTY = 0, HUMAN = 1, AI = 2, WALL = 3; 
-const TIME_LIMIT = 1500; 
-const MAX_CANDIDATES = 20;
+
+// 可变AI参数 (原常量已删除，替换为可变的全局变量)
+let CURRENT_TIME_LIMIT = 1500;      // 可调整的思考时间 (默认1500ms)
+let CURRENT_MAX_CANDIDATES = 20;    // 可调整的候选点数量 (默认20)
 
 let board = new Uint8Array(GRID_SIZE * GRID_SIZE); 
 let lastMoveIndex = -1;
@@ -245,7 +271,8 @@ function generateMoves(currentBoard) {
         return { idx, score: sAi + sHu }; 
     });
     scoredMoves.sort((a, b) => b.score - a.score);
-    return scoredMoves.slice(0, MAX_CANDIDATES).map(m => m.idx);
+    // 使用可变的候选点数量
+    return scoredMoves.slice(0, CURRENT_MAX_CANDIDATES).map(m => m.idx);
 }
 
 function evaluatePointThreat(currentBoard, idx, player) {
@@ -274,7 +301,8 @@ function evaluatePointThreat(currentBoard, idx, player) {
 }
 
 function minimax(currentBoard, depth, alpha, beta, isMaximizing) {
-    if ((nodesSearched++ % 1000) === 0 && performance.now() - aiStartTime > TIME_LIMIT) { aiTimeOut = true; return 0; }
+    // 使用可变的思考时间限制
+    if ((nodesSearched++ % 1000) === 0 && performance.now() - aiStartTime > CURRENT_TIME_LIMIT) { aiTimeOut = true; return 0; }
     if (checkTerminalWin(currentBoard, AI)) return 100000000;
     if (checkTerminalWin(currentBoard, HUMAN)) return -100000000;
     if (depth === 0) return evaluateBoard(currentBoard);
@@ -520,35 +548,84 @@ canvas.addEventListener('click', (e) => {
     }
 });
 
-// 外挂逻辑
+// ==========================================
+// 外挂参数调节逻辑 (可变AI强度)
+// ==========================================
 const cheatBtn = document.getElementById('btn-ai-cheat');
+const tunePanel = document.getElementById('ai-tune-panel');
+const timeSlider = document.getElementById('time-limit-slider');
+const candidatesSlider = document.getElementById('candidates-slider');
+const timeValue = document.getElementById('time-limit-value');
+const candidatesValue = document.getElementById('candidates-value');
+
+// 监听反馈输入框，显示/隐藏外挂面板
 document.getElementById('feedback-input').addEventListener('input', (e) => {
-    e.target.value === '666666' ? cheatBtn.classList.remove('hidden') : cheatBtn.classList.add('hidden');
+    if (e.target.value === '666666') {
+        cheatBtn.classList.remove('hidden');
+        tunePanel.classList.remove('hidden');
+    } else {
+        cheatBtn.classList.add('hidden');
+        tunePanel.classList.add('hidden');
+    }
 });
+
+// 滑动条实时更新全局AI参数
+timeSlider.addEventListener('input', (e) => {
+    CURRENT_TIME_LIMIT = parseInt(e.target.value);
+    timeValue.textContent = CURRENT_TIME_LIMIT;
+    // 显示小提示但不打扰游戏
+    if (!isAILoading) updateStatusUI(`⏱️ AI思考时间已设为 ${CURRENT_TIME_LIMIT}ms`, "text-blue-400");
+    setTimeout(() => { if (!isMultiplayer && !isAILoading) updateStatusUI(isGameActive ? "你的回合 (黑子)" : ""); }, 1500);
+});
+
+candidatesSlider.addEventListener('input', (e) => {
+    CURRENT_MAX_CANDIDATES = parseInt(e.target.value);
+    candidatesValue.textContent = CURRENT_MAX_CANDIDATES;
+    if (!isAILoading) updateStatusUI(`🎯 AI候选点已设为 ${CURRENT_MAX_CANDIDATES}`, "text-blue-400");
+    setTimeout(() => { if (!isMultiplayer && !isAILoading) updateStatusUI(isGameActive ? "你的回合 (黑子)" : ""); }, 1500);
+});
+
+// AI 帮下按钮逻辑 (适配单机和联机)
 cheatBtn.addEventListener('click', () => {
     if (!isGameActive || isAILoading) return;
-    if (isMultiplayer && currentTurn !== myRole) return;
-    isAILoading = true; updateStatusUI("外挂 AI 计算中...", "text-red-400", true);
+    if (isMultiplayer && currentTurn !== myRole) {
+        showToast("外挂: 现在不是你的回合！");
+        return;
+    }
+    isAILoading = true; 
+    updateStatusUI("⚡ 外挂 AI 启动...", "text-red-400", true);
     setTimeout(() => {
         let move = getCheatBestMove(myRole); 
         if (move !== -1) {
             if (isMultiplayer) {
                 socket.emit('makeMove', { code: currentRoomId, idx: move });
+                isAILoading = false;
             } else {
                 board[move] = HUMAN; lastMoveIndex = move; drawBoard();
-                if (checkTerminalWin(board, HUMAN)) { isGameActive = false; updateStatusUI("🏆 (外挂) 击败了 AI！", "text-green-400"); } 
-                else {
+                if (checkTerminalWin(board, HUMAN)) { 
+                    isGameActive = false; 
+                    updateStatusUI("🏆 (外挂) 击败了 AI！", "text-green-400");
+                    isAILoading = false;
+                } else {
                     updateStatusUI("AI 正在计算最佳路径...", "text-red-400", true);
                     setTimeout(() => {
                         let aiMove = getBestMove();
                         if (aiMove !== -1) {
                             board[aiMove] = AI; lastMoveIndex = aiMove; drawBoard();
-                            if (checkTerminalWin(board, AI)) { isGameActive = false; updateStatusUI("💀 游戏结束，AI 获胜！", "text-red-400"); } 
-                            else { isAILoading = false; updateStatusUI("你的回合 (黑子)"); }
+                            if (checkTerminalWin(board, AI)) { 
+                                isGameActive = false; 
+                                updateStatusUI("💀 游戏结束，AI 获胜！", "text-red-400"); 
+                            } else { 
+                                isAILoading = false; 
+                                updateStatusUI("你的回合 (黑子)"); 
+                            }
                         }
                     }, 50);
                 }
             }
+        } else {
+            isAILoading = false;
+            showToast("外挂未找到有效落子点");
         }
     }, 50);
 });
